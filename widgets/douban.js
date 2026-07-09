@@ -3,7 +3,7 @@ WidgetMetadata = {
   title: "豆瓣片单",
   version: "1.1.1",
   requiredVersion: "0.0.1",
-  description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门与类型/平台信息",
+  description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门",
   author: "adaebea",
   site: "https://www.douban.com",
   icon: "https://img3.doubanio.com/favicon.ico",
@@ -99,22 +99,6 @@ var DOUBAN_HEADERS = {
   Referer: "https://m.douban.com/mine/movie",
 };
 
-var VENDOR_NAME_MAP = {
-  youku: "优酷",
-  iqiyi: "爱奇艺",
-  tencent: "腾讯视频",
-  bilibili: "哔哩哔哩",
-  mango: "芒果TV",
-  mgtv: "芒果TV",
-  sohu: "搜狐视频",
-  le: "乐视",
-  pptv: "PP视频",
-  cntv: "央视",
-  xigua: "西瓜视频",
-  acfun: "AcFun",
-  freemovie: "免费",
-};
-
 function requireUserId(params) {
   var userId = String((params && params.userId) || "").trim();
   if (!userId) {
@@ -134,85 +118,6 @@ function toMediaType(subject) {
   return t === "tv" ? "tv" : "movie";
 }
 
-function parseGenresFromText(text) {
-  if (!text) return [];
-  var parts = String(text)
-    .split("/")
-    .map(function (s) {
-      return s.trim();
-    })
-    .filter(Boolean);
-  // card_subtitle: year / region / genres / director / actors
-  if (parts.length >= 3) {
-    var genrePart = parts[2];
-    // skip if looks like a person name only (no spaces and short) — genres usually space-separated
-    return genrePart
-      .split(/\s+/)
-      .map(function (g) {
-        return g.trim();
-      })
-      .filter(function (g) {
-        return g && g.length <= 8;
-      });
-  }
-  return [];
-}
-
-function buildGenreItems(subject) {
-  var names = [];
-  if (Array.isArray(subject.genres) && subject.genres.length) {
-    names = subject.genres.map(function (g) {
-      return typeof g === "string" ? g : g && (g.name || g.title || g.id);
-    });
-  } else {
-    names = parseGenresFromText(subject.card_subtitle || subject.info || "");
-  }
-  var items = [];
-  var seen = {};
-  for (var i = 0; i < names.length; i++) {
-    var name = String(names[i] || "").trim();
-    if (!name || seen[name]) continue;
-    seen[name] = true;
-    items.push({ id: name, title: name });
-  }
-  return items;
-}
-
-function vendorKeyFromUrl(url) {
-  var m = String(url || "").match(/\/vendors\/([^/?#]+)\.(?:png|jpg|webp)/i);
-  if (!m) return "";
-  return m[1].toLowerCase().replace(/[_-].*$/, "");
-}
-
-function buildPlatformNames(subject) {
-  var icons = subject.vendor_icons || [];
-  var names = [];
-  var seen = {};
-  for (var i = 0; i < icons.length; i++) {
-    var key = vendorKeyFromUrl(icons[i]);
-    var name = VENDOR_NAME_MAP[key] || (key ? key : "");
-    if (!name || seen[name]) continue;
-    seen[name] = true;
-    names.push(name);
-  }
-  return names;
-}
-
-function buildDescription(subject, genreItems, platforms) {
-  var parts = [];
-  if (subject.card_subtitle) {
-    parts.push(String(subject.card_subtitle));
-  } else if (subject.info) {
-    parts.push(String(subject.info));
-  }
-  if (platforms.length) {
-    parts.push("可播: " + platforms.join(" / "));
-  } else if (subject.has_linewatch) {
-    parts.push("可在线观看");
-  }
-  return parts.join("\n");
-}
-
 function resolvePoster(subject) {
   var pic = subject.pic || {};
   if (pic.normal) return pic.normal;
@@ -222,11 +127,19 @@ function resolvePoster(subject) {
   return "";
 }
 
+function buildDescription(subject) {
+  var parts = [];
+  if (subject.card_subtitle) {
+    parts.push(String(subject.card_subtitle));
+  } else if (subject.info) {
+    parts.push(String(subject.info));
+  }
+  return parts.join("\n");
+}
+
 function toVideoItem(subject) {
   if (!subject || !subject.id) return null;
   var rating = subject.rating || {};
-  var genreItems = buildGenreItems(subject);
-  var platforms = buildPlatformNames(subject);
   var ratingValue = typeof rating.value === "number" ? rating.value : undefined;
   if (ratingValue === 0) ratingValue = undefined;
   return {
@@ -236,28 +149,9 @@ function toVideoItem(subject) {
     posterPath: resolvePoster(subject),
     rating: ratingValue,
     mediaType: toMediaType(subject),
-    description: buildDescription(subject, genreItems, platforms),
+    description: buildDescription(subject),
     releaseDate: subject.year ? String(subject.year) : subject.release_date || undefined,
-    genreItems: genreItems,
   };
-}
-
-function hasGenre(item, genreId) {
-  if (!genreId) return true;
-  var list = item.genreItems || [];
-  for (var i = 0; i < list.length; i++) {
-    if (String(list[i].id) === String(genreId)) return true;
-  }
-  return false;
-}
-
-function filterByGenre(items, genreId) {
-  if (!genreId) return items;
-  var out = [];
-  for (var i = 0; i < items.length; i++) {
-    if (hasGenre(items[i], genreId)) out.push(items[i]);
-  }
-  return out;
 }
 
 async function fetchInterests(userId, status, start, count) {
@@ -340,7 +234,7 @@ async function loadStatusList(params, status) {
     var p = pageParams(params);
     var data = await fetchInterests(userId, status, p.start, p.count);
     var items = mapInterests(data);
-    return filterByGenre(items, params.genreId);
+    return items;
   } catch (error) {
     console.error("[douban] loadStatusList(" + status + ") 失败:", error.message || error);
     throw error;
@@ -407,7 +301,7 @@ async function loadRecommendList(params) {
     var items = ranked.slice(p.start, p.start + p.count).map(function (row) {
       return row.item;
     });
-    return filterByGenre(items, params.genreId);
+    return items;
   } catch (error) {
     console.error("[douban] loadRecommendList 失败:", error.message || error);
     throw error;
@@ -424,7 +318,7 @@ async function loadHotList(params) {
     var allItems = mapChartItems(data);
     // 本地切片分页
     var items = allItems.slice(p.start, p.start + p.count);
-    return filterByGenre(items, params.genreId);
+    return items;
   } catch (error) {
     console.error("[douban] loadHotList 失败:", error.message || error);
     throw error;
