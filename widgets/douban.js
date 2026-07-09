@@ -4,7 +4,7 @@ WidgetMetadata = {
   version: "1.0.0",
   requiredVersion: "0.0.1",
   description: "展示豆瓣想看/在看，并根据看过记录推荐可能想看的内容",
-  author: "Forward",
+  author: "adaebea",
   site: "https://www.douban.com",
   icon: "https://img3.doubanio.com/favicon.ico",
   detailCacheDuration: 3600,
