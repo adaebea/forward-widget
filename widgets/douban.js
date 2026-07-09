@@ -70,6 +70,7 @@ WidgetMetadata = {
       id: "hotList",
       title: "近期热门",
       functionName: "loadHotList",
+      sectionMode: true,
       cacheDuration: 1800,
       params: [
         {
