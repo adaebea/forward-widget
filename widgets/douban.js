@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.douban.personal",
   title: "豆瓣片单",
-  version: "1.1.1",
+  version: "1.2.0",
   requiredVersion: "0.0.1",
   description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门",
   author: "adaebea",
