@@ -13,7 +13,13 @@ const SUBJECT_MOVIE = {
   type: "movie",
   subtype: "movie",
   year: "1994",
-  card_subtitle: "1994 / 美国 / 剧情",
+  card_subtitle: "1994 / 美国 / 剧情 犯罪",
+  genres: ["剧情", "犯罪"],
+  has_linewatch: true,
+  vendor_icons: [
+    "https://img3.doubanio.com/f/frodo/xxx/pics/vendors/youku.png",
+    "https://img3.doubanio.com/f/frodo/xxx/pics/vendors/iqiyi.png",
+  ],
   pic: {
     normal: "https://img.example.com/shawshank.jpg",
     large: "https://img.example.com/shawshank-l.jpg",
@@ -28,10 +34,24 @@ const SUBJECT_TV = {
   subtype: "tv",
   year: "2016",
   card_subtitle: "2016 / 日本 / 喜剧",
+  genres: ["喜剧"],
+  has_linewatch: true,
+  vendor_icons: ["https://img3.doubanio.com/f/frodo/xxx/pics/vendors/tencent.png"],
   pic: {
     normal: "https://img.example.com/hibana.jpg",
   },
   rating: { value: 9.2, count: 50, max: 10, star_count: 5 },
+};
+
+const HOT_ITEM = {
+  id: "37450627",
+  title: "痴迷",
+  type: "movie",
+  year: "2025",
+  card_subtitle: "2025 / 美国 / 恐怖 / 库里·巴克 / 演员",
+  has_linewatch: false,
+  rating: { value: 7.7, count: 100, max: 10, star_count: 4 },
+  cover: { url: "https://img.example.com/hot.jpg" },
 };
 
 const SUBJECT_OWNED = {
@@ -160,6 +180,19 @@ global.Widget = {
         return { data: [] };
       }
 
+      // hot charts
+      const chartMatch = p.match(/\/subject_collection\/([^/]+)\/items$/);
+      if (chartMatch) {
+        return {
+          data: {
+            start: 0,
+            count: 20,
+            total: 1,
+            subject_collection_items: [HOT_ITEM],
+          },
+        };
+      }
+
       throw new Error("unmocked url: " + url);
     },
     post: async (url) => {
@@ -221,10 +254,28 @@ function assertVideoItemShape(item, expected) {
     mediaType: "movie",
   });
   assert.ok(typeof wish[0].rating === "number");
+  assert.ok(Array.isArray(wish[0].genreItems));
+  assert.deepEqual(
+    wish[0].genreItems.map((g) => g.id),
+    ["剧情", "犯罪"]
+  );
+  assert.ok(wish[0].genreItems.every((g) => g.id && g.title), "genreItems need id+title");
+  assert.ok(
+    String(wish[0].description).includes("优酷") && String(wish[0].description).includes("爱奇艺"),
+    "description should include platform names"
+  );
+  assert.equal(wish[0].genres, undefined, "raw genres must not leak");
+  assert.equal(wish[0].vendor_icons, undefined, "raw vendor_icons must not leak");
   assert.ok(
     calls.some((c) => /status=mark/.test(c.url) && /user\/ahbei\/interests/.test(c.url)),
     "wish must request status=mark"
   );
+
+  // --- genre filter ---
+  const wishCrime = await loadWishList({ userId: "ahbei", page: 1, genreId: "犯罪" });
+  assert.equal(wishCrime.length, 1);
+  const wishAction = await loadWishList({ userId: "ahbei", page: 1, genreId: "动作" });
+  assert.equal(wishAction.length, 0, "genre filter should drop non-matching");
 
   // --- watching list ---
   calls.length = 0;
@@ -236,9 +287,27 @@ function assertVideoItemShape(item, expected) {
     poster: "https://img.example.com/hibana.jpg",
     mediaType: "tv",
   });
+  assert.ok(String(watching[0].description).includes("腾讯"), "tv platform name");
   assert.ok(
     calls.some((c) => /status=doing/.test(c.url)),
     "watching must request status=doing"
+  );
+
+  // --- hot list (no userId required) ---
+  calls.length = 0;
+  const hot = await loadHotList({ chart: "movie_hot_gaia", page: 1, count: "20" });
+  assert.equal(hot.length, 1);
+  assert.equal(hot[0].type, "douban");
+  assert.equal(hot[0].id, "37450627");
+  assert.equal(hot[0].posterPath, "https://img.example.com/hot.jpg");
+  assert.ok(Array.isArray(hot[0].genreItems));
+  assert.ok(
+    hot[0].genreItems.some((g) => g.id === "恐怖"),
+    "should parse genres from card_subtitle when genres missing"
+  );
+  assert.ok(
+    calls.some((c) => /subject_collection\/movie_hot_gaia\/items/.test(c.url)),
+    "hot list must hit chart collection API"
   );
 
   // --- recommend: only high-rated seeds, exclude owned/wish/doing ---
@@ -281,7 +350,12 @@ function assertVideoItemShape(item, expected) {
   assert.ok(Array.isArray(page2));
   assert.equal(page2.length, 0, "page 2 should be empty with only 2 recs");
 
-  console.log("✅ ok", { wish: wish.length, watching: watching.length, recs: recs.length });
+  console.log("✅ ok", {
+    wish: wish.length,
+    watching: watching.length,
+    recs: recs.length,
+    hot: hot.length,
+  });
 })().catch((e) => {
   console.error("❌", e);
   process.exit(1);
