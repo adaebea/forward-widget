@@ -419,8 +419,11 @@ async function loadHotList(params) {
     params = params || {};
     var chart = String(params.chart || "movie_hot_gaia").trim() || "movie_hot_gaia";
     var p = pageParams(params);
-    var data = await fetchChartItems(chart, p.start, p.count);
-    var items = mapChartItems(data);
+    // 一次性拉取100条，本地做分页
+    var data = await fetchChartItems(chart, 0, 100);
+    var allItems = mapChartItems(data);
+    // 本地切片分页
+    var items = allItems.slice(p.start, p.start + p.count);
     return filterByGenre(items, params.genreId);
   } catch (error) {
     console.error("[douban] loadHotList 失败:", error.message || error);
