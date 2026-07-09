@@ -138,27 +138,52 @@ global.Widget = {
           };
         }
         if (status === "done") {
+          const start = Number(query.start || 0);
+          // page0: high-rated seed + low-rated; page1: older watched item that recs may return
+          if (start === 0) {
+            return {
+              data: {
+                start: 0,
+                count: 50,
+                total: 51,
+                interests: [
+                  {
+                    status: "done",
+                    rating: { value: 5, max: 5, star_count: 5 },
+                    subject: SUBJECT_OWNED,
+                  },
+                  {
+                    status: "done",
+                    rating: { value: 3, max: 5, star_count: 3 },
+                    subject: {
+                      id: "low-rated",
+                      title: "低分片",
+                      type: "movie",
+                      subtype: "movie",
+                      pic: { normal: "https://img.example.com/low.jpg" },
+                      rating: { value: 6.0 },
+                    },
+                  },
+                ],
+              },
+            };
+          }
           return {
             data: {
-              start: 0,
-              count: 20,
-              total: 2,
+              start: start,
+              count: 50,
+              total: 51,
               interests: [
                 {
                   status: "done",
-                  rating: { value: 5, max: 5, star_count: 5 },
-                  subject: SUBJECT_OWNED,
-                },
-                {
-                  status: "done",
-                  rating: { value: 3, max: 5, star_count: 3 },
+                  rating: { value: 4, max: 5, star_count: 4 },
                   subject: {
-                    id: "low-rated",
-                    title: "低分片",
+                    id: "old-watched-999",
+                    title: "很久以前看过",
                     type: "movie",
                     subtype: "movie",
-                    pic: { normal: "https://img.example.com/low.jpg" },
-                    rating: { value: 6.0 },
+                    pic: { normal: "https://img.example.com/old.jpg" },
+                    rating: { value: 8.0 },
                   },
                 },
               ],
@@ -174,7 +199,20 @@ global.Widget = {
         // seed 26752088 returns A twice-path and B; also re-suggest owned to test exclude
         if (seedId === "26752088") {
           return {
-            data: [SUBJECT_REC_A, SUBJECT_REC_B, SUBJECT_OWNED, SUBJECT_MOVIE],
+            data: [
+              SUBJECT_REC_A,
+              SUBJECT_REC_B,
+              SUBJECT_OWNED,
+              SUBJECT_MOVIE,
+              {
+                id: "old-watched-999",
+                title: "很久以前看过",
+                type: "movie",
+                subtype: "movie",
+                pic: { normal: "https://img.example.com/old.jpg" },
+                rating: { value: 8.0 },
+              },
+            ],
           };
         }
         return { data: [] };
@@ -324,7 +362,12 @@ function assertVideoItemShape(item, expected) {
   assert.ok(!recIds.includes("26752088"), "must exclude already-watched seed");
   assert.ok(!recIds.includes("1292052"), "must exclude wish list item");
   assert.ok(!recIds.includes("26635329"), "must exclude watching item");
+  assert.ok(!recIds.includes("old-watched-999"), "must exclude watched beyond first page");
   assert.ok(!recIds.includes("low-rated"), "low-rated should not be a seed output");
+  assert.ok(
+    calls.filter((c) => /status=done/.test(c.url)).length >= 2,
+    "must paginate done list for exclude set"
+  );
   for (const item of recs) {
     assert.equal(item.type, "douban");
     assert.equal(item.poster_path, undefined);
