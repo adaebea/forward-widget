@@ -142,11 +142,13 @@ function toVideoItem(subject) {
   var rating = subject.rating || {};
   var ratingValue = typeof rating.value === "number" ? rating.value : undefined;
   if (ratingValue === 0) ratingValue = undefined;
+  var posterUrl = resolvePoster(subject);
   return {
     id: String(subject.id),
     type: "douban",
     title: subject.title || "",
-    posterPath: resolvePoster(subject),
+    posterPath: posterUrl,
+    backdropPath: posterUrl,
     rating: ratingValue,
     mediaType: toMediaType(subject),
     description: buildDescription(subject),
