@@ -284,7 +284,7 @@ async function fetchRecommendations(subjectId) {
     DOUBAN_API +
     "/movie/" +
     encodeURIComponent(subjectId) +
-    "/recommendations?count=20";
+    "/recommendations?count=100";
   try {
     var res = await Widget.http.get(url, { headers: DOUBAN_HEADERS });
     var data = res && res.data;
@@ -355,44 +355,6 @@ async function loadWatchingList(params) {
   return loadStatusList(params || {}, "doing");
 }
 
-// 拉全量想看/在看/看过 id 做排除；单状态最多 20 页 * 50 = 1000 条，避免无限请求
-var EXCLUDE_PAGE_SIZE = 50;
-var EXCLUDE_MAX_PAGES = 20;
-
-async function fetchAllInterestIds(userId, status) {
-  var ids = {};
-  var start = 0;
-  for (var page = 0; page < EXCLUDE_MAX_PAGES; page++) {
-    var data = await fetchInterests(userId, status, start, EXCLUDE_PAGE_SIZE);
-    var interests = (data && data.interests) || [];
-    for (var j = 0; j < interests.length; j++) {
-      var sub = interests[j] && interests[j].subject;
-      if (sub && sub.id) ids[String(sub.id)] = true;
-    }
-    var total = Number((data && data.total) || 0);
-    start += EXCLUDE_PAGE_SIZE;
-    if (interests.length === 0 || start >= total) break;
-  }
-  return ids;
-}
-
-async function collectExcludeIds(userId) {
-  var statuses = ["mark", "doing", "done"];
-  var set = {};
-  for (var i = 0; i < statuses.length; i++) {
-    try {
-      var pageIds = await fetchAllInterestIds(userId, statuses[i]);
-      var keys = Object.keys(pageIds);
-      for (var k = 0; k < keys.length; k++) {
-        set[keys[k]] = true;
-      }
-    } catch (error) {
-      console.error("[douban] exclude fetch failed", statuses[i], error.message || error);
-    }
-  }
-  return set;
-}
-
 async function loadRecommendList(params) {
   try {
     params = params || {};
@@ -414,11 +376,6 @@ async function loadRecommendList(params) {
       if (seeds.length >= seedCount) break;
     }
 
-    var exclude = await collectExcludeIds(userId);
-    for (var s = 0; s < seeds.length; s++) {
-      exclude[String(seeds[s].id)] = true;
-    }
-
     var scoreMap = {};
     var itemMap = {};
     var tasks = seeds.map(function (seed) {
@@ -427,7 +384,6 @@ async function loadRecommendList(params) {
           var rec = recs[r];
           if (!rec || !rec.id) continue;
           var id = String(rec.id);
-          if (exclude[id]) continue;
           scoreMap[id] = (scoreMap[id] || 0) + 1;
           if (!itemMap[id]) {
             var video = toVideoItem(rec);
