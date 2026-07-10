@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.douban.personal",
   title: "豆瓣片单",
-  version: "1.2.1",
+  version: "1.2.2",
   requiredVersion: "0.0.1",
   description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门",
   author: "adaebea",
@@ -148,6 +148,7 @@ function toVideoItem(subject) {
     id: String(subject.id),
     type: "douban",
     title: subject.title || "",
+    coverUrl: posterUrl,
     posterPath: posterUrl,
     backdropPath: posterUrl,
     rating: ratingValue,
@@ -155,6 +156,14 @@ function toVideoItem(subject) {
     description: buildDescription(subject),
     releaseDate: subject.year ? String(subject.year) : subject.release_date || undefined,
   };
+}
+
+function toBannerVideoItem(subject) {
+  var item = toVideoItem(subject);
+  if (!item) return null;
+  item.type = "url";
+  item.link = "douban:" + item.id;
+  return item;
 }
 
 async function fetchInterests(userId, status, start, count) {
@@ -225,10 +234,26 @@ function mapChartItems(data) {
   var list = (data && data.subject_collection_items) || [];
   var items = [];
   for (var i = 0; i < list.length; i++) {
-    var item = toVideoItem(list[i]);
+    var item = toBannerVideoItem(list[i]);
     if (item) items.push(item);
   }
   return items;
+}
+
+async function loadDetail(link) {
+  var match = String(link || "").match(/^douban:(\d+)$/);
+  if (!match) return null;
+  try {
+    var url = DOUBAN_API + "/subject/" + encodeURIComponent(match[1]);
+    var res = await Widget.http.get(url, { headers: DOUBAN_HEADERS });
+    var subject = res && res.data;
+    var item = toBannerVideoItem(subject);
+    if (item && subject.intro) item.description = String(subject.intro);
+    return item;
+  } catch (error) {
+    console.error("[douban] loadDetail 失败:", error.message || error);
+    throw error;
+  }
 }
 
 async function loadStatusList(params, status) {
