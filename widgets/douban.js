@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.douban.personal",
   title: "豆瓣片单",
-  version: "1.2.2",
+  version: "1.2.3",
   requiredVersion: "0.0.1",
   description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门",
   author: "adaebea",
@@ -158,14 +158,6 @@ function toVideoItem(subject) {
   };
 }
 
-function toBannerVideoItem(subject) {
-  var item = toVideoItem(subject);
-  if (!item) return null;
-  item.type = "url";
-  item.link = "douban:" + item.id;
-  return item;
-}
-
 async function fetchInterests(userId, status, start, count) {
   var url =
     DOUBAN_API +
@@ -230,30 +222,72 @@ function mapInterests(data) {
   return items;
 }
 
-function mapChartItems(data) {
-  var list = (data && data.subject_collection_items) || [];
-  var items = [];
-  for (var i = 0; i < list.length; i++) {
-    var item = toBannerVideoItem(list[i]);
-    if (item) items.push(item);
+async function toTmdbBannerItem(subject) {
+  if (!subject || !subject.id || !subject.title) return null;
+  var mediaType = toMediaType(subject);
+  var searchParams = {
+    query: subject.title,
+    language: "zh-CN",
+    include_adult: false,
+  };
+  if (subject.year) {
+    if (mediaType === "tv") searchParams.first_air_date_year = String(subject.year);
+    else searchParams.year = String(subject.year);
   }
-  return items;
+  var data = await Widget.tmdb.get("search/" + mediaType, {
+    params: searchParams,
+  });
+  var results = (data && data.results) || [];
+  var subjectTitle = normalizeTitle(subject.title);
+  var subjectYear = String(subject.year || "");
+  var match = null;
+  for (var i = 0; i < results.length; i++) {
+    var result = results[i];
+    if (!result || !result.backdrop_path) continue;
+    var titles = [result.title, result.name, result.original_title, result.original_name];
+    var titleMatches = titles.some(function (title) {
+      return normalizeTitle(title) === subjectTitle;
+    });
+    if (!titleMatches) continue;
+    var resultDate = result.release_date || result.first_air_date || "";
+    if (subjectYear && resultDate && String(resultDate).slice(0, 4) !== subjectYear) continue;
+    match = result;
+    break;
+  }
+  if (!match) return null;
+  var rating = typeof match.vote_average === "number" && match.vote_average > 0
+    ? match.vote_average
+    : undefined;
+  return {
+    id: match.id,
+    type: "tmdb",
+    title: subject.title,
+    posterPath: match.poster_path || undefined,
+    backdropPath: match.backdrop_path,
+    rating: rating,
+    mediaType: mediaType,
+    description: match.overview || buildDescription(subject),
+    releaseDate: match.release_date || match.first_air_date || undefined,
+  };
 }
 
-async function loadDetail(link) {
-  var match = String(link || "").match(/^douban:(\d+)$/);
-  if (!match) return null;
-  try {
-    var url = DOUBAN_API + "/subject/" + encodeURIComponent(match[1]);
-    var res = await Widget.http.get(url, { headers: DOUBAN_HEADERS });
-    var subject = res && res.data;
-    var item = toBannerVideoItem(subject);
-    if (item && subject.intro) item.description = String(subject.intro);
-    return item;
-  } catch (error) {
-    console.error("[douban] loadDetail 失败:", error.message || error);
-    throw error;
+function normalizeTitle(title) {
+  return String(title || "")
+    .toLowerCase()
+    .replace(/[\s·・:：,，.。!！?？'"“”‘’《》〈〉【】（）()\-—_]+/g, "");
+}
+
+async function mapChartItemsForBanner(data, neededCount) {
+  var list = (data && data.subject_collection_items) || [];
+  var items = [];
+  for (var start = 0; start < list.length && items.length < neededCount; start += 10) {
+    var batch = list.slice(start, start + 10);
+    var matched = await Promise.all(batch.map(toTmdbBannerItem));
+    for (var i = 0; i < matched.length; i++) {
+      if (matched[i]) items.push(matched[i]);
+    }
   }
+  return items;
 }
 
 async function loadStatusList(params, status) {
@@ -341,10 +375,9 @@ async function loadHotList(params) {
     params = params || {};
     var chart = String(params.chart || "movie_hot_gaia").trim() || "movie_hot_gaia";
     var p = pageParams(params);
-    // 一次性拉取100条，本地做分页
+    // 豆瓣图片有防盗链，Banner 改用 TMDB 横图并跳过无法匹配的条目。
     var data = await fetchChartItems(chart, 0, 100);
-    var allItems = mapChartItems(data);
-    // 本地切片分页
+    var allItems = await mapChartItemsForBanner(data, p.start + p.count);
     var items = allItems.slice(p.start, p.start + p.count);
     return items;
   } catch (error) {

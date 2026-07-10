@@ -2,7 +2,7 @@ const fs = require("fs");
 const assert = require("assert/strict");
 const calls = [];
 
-const hotItems = Array.from({ length: 20 }, function (_, index) {
+const hotItems = Array.from({ length: 21 }, function (_, index) {
   var number = index + 1;
   return {
     id: String(37000000 + number),
@@ -33,6 +33,36 @@ global.Widget = {
       throw new Error("unmocked url: " + url);
     },
   },
+  tmdb: {
+    get: async function (api, options) {
+      calls.push({ api: api, options: options });
+      var title = options.params.query;
+      var number = Number(title.split(" ").pop());
+      if (number === 1) return { results: [] };
+      if (number === 99) throw new Error("TMDB unavailable");
+      return {
+        results: [
+          {
+            id: 9000 + number,
+            title: "错误匹配 " + number,
+            poster_path: "/wrong-poster-" + number + ".jpg",
+            backdrop_path: "/wrong-backdrop-" + number + ".jpg",
+            release_date: "2026-01-01",
+          },
+          {
+            id: 1000 + number,
+            title: title,
+            media_type: "movie",
+            poster_path: "/poster-" + number + ".jpg",
+            backdrop_path: "/backdrop-" + number + ".jpg",
+            release_date: "2026-01-01",
+            vote_average: 8,
+            overview: "TMDB 简介",
+          },
+        ],
+      };
+    },
+  },
 };
 global.WidgetMetadata = {};
 
@@ -42,30 +72,34 @@ eval(fs.readFileSync("./widgets/douban.js", "utf8"));
   var hot = await loadHotList({ chart: "movie_hot_gaia", page: 1, count: 20 });
   assert.equal(hot.length, 20);
   hot.forEach(function (item, index) {
-    assert.equal(item.type, "url", "hot item " + (index + 1) + " must use direct image rendering");
-    assert.equal(item.link, "douban:" + item.id);
-    assert.equal(item.coverUrl, hotItems[index].cover.url);
-    assert.equal(item.backdropPath, hotItems[index].cover.url);
+    var number = index + 2;
+    assert.equal(item.type, "tmdb", "hot item " + (index + 1) + " must use TMDB image rendering");
+    assert.equal(item.id, 1000 + number);
+    assert.equal(item.mediaType, "movie");
+    assert.equal(item.posterPath, "/poster-" + number + ".jpg");
+    assert.equal(item.backdropPath, "/backdrop-" + number + ".jpg");
+    assert.equal(item.link, undefined);
   });
+  assert.ok(calls.some(function (call) {
+    return call.api === "search/movie" &&
+      call.options.params.query === "热门影片 21" &&
+      call.options.params.year === "2026";
+  }), "must continue matching until 20 image-backed items are available");
 
-  var detail = await loadDetail(hot[19].link);
-  assert.equal(detail.type, "url");
-  assert.equal(detail.id, hot[19].id);
-  assert.equal(detail.link, hot[19].link);
-  assert.equal(detail.description, "详情简介");
-  assert.equal(detail.backdropPath, hotItems[19].cover.url);
-  var detailCall = calls.find(function (call) {
-    return call.url.endsWith("/subject/" + hot[19].id);
-  });
-  assert.ok(detailCall, "detail must request the matching subject endpoint");
-  assert.equal(detailCall.options.headers.Referer, "https://m.douban.com/mine/movie");
+  await assert.rejects(
+    function () {
+      return toTmdbBannerItem({ id: "99", title: "热门影片 99", type: "movie", year: "2026" });
+    },
+    /TMDB unavailable/,
+    "TMDB failures must not be converted into silent empty banner results"
+  );
 
   var wish = await loadWishList({ userId: "test", page: 1, count: 20 });
   assert.equal(wish[0].type, "douban", "non-banner lists must retain built-in Douban details");
   assert.equal(wish[0].link, undefined);
 
-  assert.equal(WidgetMetadata.version, "1.2.2");
-  console.log("ok: all 20 hot items provide directly rendered banner images");
+  assert.equal(WidgetMetadata.version, "1.2.3");
+  console.log("ok: all 20 hot items use TMDB-backed banner images");
 })().catch(function (error) {
   console.error(error);
   process.exit(1);
