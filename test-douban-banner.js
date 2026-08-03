@@ -98,7 +98,7 @@ eval(fs.readFileSync("./widgets/douban.js", "utf8"));
   assert.equal(wish[0].type, "url", "non-banner lists must render their Douban-returned fields directly");
   assert.equal(wish[0].link, "https://movie.douban.com/subject/37000001/");
 
-  assert.equal(WidgetMetadata.version, "1.2.6");
+  assert.equal(WidgetMetadata.version, "1.2.7");
   console.log("ok: all 20 hot items use TMDB-backed banner images");
 })().catch(function (error) {
   console.error(error);

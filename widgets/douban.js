@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.douban.personal",
   title: "豆瓣片单",
-  version: "1.2.6",
+  version: "1.2.7",
   requiredVersion: "0.0.1",
   description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门",
   author: "adaebea",
@@ -222,27 +222,25 @@ async function toVideoItemWithTmdbPoster(subject) {
   if (!item || !Widget.tmdb || typeof Widget.tmdb.get !== "function") return item;
   try {
     var mediaType = toMediaType(subject);
-    var searchParams = {
-      query: subject.title,
-      language: "zh-CN",
-      include_adult: false,
-    };
-    if (subject.year) {
-      if (mediaType === "tv") searchParams.first_air_date_year = String(subject.year);
-      else searchParams.year = String(subject.year);
-    }
-    var data = await Widget.tmdb.get("search/" + mediaType, { params: searchParams });
-    var match = findTmdbPosterMatch(subject, (data && data.results) || []);
+    var match = await findTmdbPoster(subject, subject.title, true);
     if (!match && mediaType === "tv") {
       var baseTitle = tvBaseTitle(subject.title);
       if (baseTitle && baseTitle !== subject.title) {
-        var fallbackParams = {
-          query: baseTitle,
-          language: "zh-CN",
-          include_adult: false,
-        };
-        var fallbackData = await Widget.tmdb.get("search/tv", { params: fallbackParams });
-        match = findTmdbPosterMatch(subject, (fallbackData && fallbackData.results) || []);
+        match = await findTmdbPoster(subject, baseTitle, false);
+      }
+    }
+    if (!match) {
+      var detail = await fetchSubjectDetail(subject.id);
+      var originalTitle = detail && (detail.original_title || detail.original_name);
+      if (originalTitle && normalizeTitle(originalTitle) !== normalizeTitle(subject.title)) {
+        var subjectWithOriginalTitle = {};
+        var subjectKeys = Object.keys(subject);
+        for (var keyIndex = 0; keyIndex < subjectKeys.length; keyIndex++) {
+          subjectWithOriginalTitle[subjectKeys[keyIndex]] = subject[subjectKeys[keyIndex]];
+        }
+        subjectWithOriginalTitle.title = String(originalTitle);
+        if (detail.year) subjectWithOriginalTitle.year = detail.year;
+        match = await findTmdbPoster(subjectWithOriginalTitle, originalTitle, false);
       }
     }
     if (!match) return item;
@@ -256,6 +254,27 @@ async function toVideoItemWithTmdbPoster(subject) {
     console.error("[douban] TMDB poster lookup failed", subject && subject.id, error.message || error);
     return item;
   }
+}
+
+async function findTmdbPoster(subject, query, includeYear) {
+  var mediaType = toMediaType(subject);
+  var searchParams = {
+    query: query,
+    language: "zh-CN",
+    include_adult: false,
+  };
+  if (includeYear && subject.year) {
+    if (mediaType === "tv") searchParams.first_air_date_year = String(subject.year);
+    else searchParams.year = String(subject.year);
+  }
+  var data = await Widget.tmdb.get("search/" + mediaType, { params: searchParams });
+  var subjectForMatch = {};
+  var keys = Object.keys(subject);
+  for (var i = 0; i < keys.length; i++) {
+    subjectForMatch[keys[i]] = subject[keys[i]];
+  }
+  subjectForMatch.title = String(query || subject.title || "");
+  return findTmdbPosterMatch(subjectForMatch, (data && data.results) || []);
 }
 
 async function fetchInterests(userId, status, start, count) {
@@ -275,6 +294,12 @@ async function fetchInterests(userId, status, start, count) {
     throw new Error("豆瓣片单接口无响应");
   }
   return data;
+}
+
+async function fetchSubjectDetail(subjectId) {
+  var url = DOUBAN_API + "/subject/" + encodeURIComponent(subjectId);
+  var res = await Widget.http.get(url, { headers: DOUBAN_HEADERS });
+  return res && res.data;
 }
 
 async function fetchRecommendations(subjectId) {
@@ -335,9 +360,7 @@ async function loadDetail(link) {
   var match = String(link || "").match(/movie\.douban\.com\/subject\/(\d+)/);
   if (!match) return null;
   try {
-    var url = DOUBAN_API + "/subject/" + encodeURIComponent(match[1]);
-    var res = await Widget.http.get(url, { headers: DOUBAN_HEADERS });
-    var subject = res && res.data;
+    var subject = await fetchSubjectDetail(match[1]);
     var item = await toVideoItemWithTmdbPoster(subject);
     if (item && subject && subject.intro) item.description = String(subject.intro);
     return item;

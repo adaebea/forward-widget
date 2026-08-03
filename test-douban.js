@@ -325,6 +325,49 @@ function assertVideoItemShape(item, expected) {
   assert.equal(enrichedWish.posterPath, "https://image.tmdb.org/t/p/w500/shawshank-poster.jpg");
   assert.equal(enrichedWish.backdropPath, "https://image.tmdb.org/t/p/w500/shawshank-backdrop.jpg");
   delete Widget.tmdb;
+
+  const originalHttpGet = Widget.http.get;
+  Widget.http.get = async (url, options) => {
+    if (/\/subject\/36700709$/.test(url)) {
+      return {
+        data: {
+          id: "36700709",
+          title: "十角馆事件",
+          original_title: "十角館の殺人",
+          type: "tv",
+          year: "2024",
+        },
+      };
+    }
+    return originalHttpGet(url, options);
+  };
+  Widget.tmdb = {
+    get: async (api, options) => {
+      assert.equal(api, "search/tv");
+      if (options.params.query === "十角馆事件") return { results: [] };
+      assert.equal(options.params.query, "十角館の殺人");
+      return {
+        results: [{
+          id: 251732,
+          name: "十角館の殺人",
+          original_name: "十角館の殺人",
+          poster_path: "/decagon.jpg",
+          first_air_date: "2024-03-22",
+        }],
+      };
+    },
+  };
+  const enrichedOriginalTitle = await toVideoItemWithTmdbPoster({
+    id: "36700709",
+    title: "十角馆事件",
+    type: "tv",
+    year: "2024",
+    pic: { normal: "https://img.example.com/decagon.jpg" },
+  });
+  assert.equal(enrichedOriginalTitle.posterPath, "https://image.tmdb.org/t/p/w500/decagon.jpg");
+  Widget.http.get = originalHttpGet;
+  delete Widget.tmdb;
+
   const detail = await loadDetail(wish[0].link);
   assertVideoItemShape(detail, {
     id: "1292052",
