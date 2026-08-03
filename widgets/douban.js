@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.douban.personal",
   title: "豆瓣片单",
-  version: "1.2.3",
+  version: "1.2.4",
   requiredVersion: "0.0.1",
   description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门",
   author: "adaebea",
@@ -33,7 +33,7 @@ WidgetMetadata = {
       id: "wishList",
       title: "我想看",
       functionName: "loadWishList",
-      cacheDuration: 1800,
+      cacheDuration: 300,
       params: [
         { name: "page", title: "页码", type: "page" },
         { name: "count", title: "每页数量", type: "count", value: "20" },
@@ -43,7 +43,7 @@ WidgetMetadata = {
       id: "watchingList",
       title: "我在看",
       functionName: "loadWatchingList",
-      cacheDuration: 1800,
+      cacheDuration: 300,
       params: [
         { name: "page", title: "页码", type: "page" },
         { name: "count", title: "每页数量", type: "count", value: "20" },
@@ -53,7 +53,7 @@ WidgetMetadata = {
       id: "recommendList",
       title: "可能想看",
       functionName: "loadRecommendList",
-      cacheDuration: 3600,
+      cacheDuration: 300,
       params: [
         { name: "page", title: "页码", type: "page" },
         { name: "count", title: "每页数量", type: "count", value: "20" },
@@ -311,6 +311,125 @@ async function loadWatchingList(params) {
   return loadStatusList(params || {}, "doing");
 }
 
+// 推荐结果必须排除用户已经标记过的条目。豆瓣接口单页最多返回 50 条，
+// 因此不能只取首页，也不能用固定页数截断（片单超过 1,000 条时会漏过滤）。
+var EXCLUDE_PAGE_SIZE = 50;
+var EXCLUDE_FETCH_CONCURRENCY = 2;
+// 完整索引每月重建一次；每次推荐仍会补查每个状态的最新 50 条，
+// 所以最近标记的内容不会等到下个月才被排除。
+var EXCLUDE_CACHE_TTL = 30 * 24 * 60 * 60 * 1000;
+var EXCLUDE_CACHE_PREFIX = "forward.douban.personal.exclude.v1:";
+
+function addInterestIds(data, set) {
+  var interests = (data && data.interests) || [];
+  for (var i = 0; i < interests.length; i++) {
+    var subject = interests[i] && interests[i].subject;
+    if (subject && subject.id) set[String(subject.id)] = true;
+  }
+}
+
+function copyIdSet(ids) {
+  var set = {};
+  if (!ids || typeof ids !== "object") return set;
+  var keys = Object.keys(ids);
+  for (var i = 0; i < keys.length; i++) {
+    if (ids[keys[i]]) set[keys[i]] = true;
+  }
+  return set;
+}
+
+function excludeCacheKey(userId) {
+  return EXCLUDE_CACHE_PREFIX + encodeURIComponent(userId);
+}
+
+async function readExcludeCache(userId) {
+  if (!Widget.storage || typeof Widget.storage.get !== "function") return null;
+  try {
+    var cached = await Widget.storage.get(excludeCacheKey(userId));
+    var updatedAt = Number(cached && cached.updatedAt);
+    if (!cached || !cached.ids || !updatedAt) return null;
+    if (Date.now() - updatedAt > EXCLUDE_CACHE_TTL) return null;
+    return cached;
+  } catch (error) {
+    console.error("[douban] exclude cache read failed", error.message || error);
+    return null;
+  }
+}
+
+async function writeExcludeCache(userId, ids) {
+  if (!Widget.storage || typeof Widget.storage.set !== "function") return;
+  try {
+    await Widget.storage.set(excludeCacheKey(userId), {
+      updatedAt: Date.now(),
+      ids: ids,
+    });
+  } catch (error) {
+    console.error("[douban] exclude cache write failed", error.message || error);
+  }
+}
+
+async function fetchAllInterestIds(userId, status, firstPageData) {
+  var ids = {};
+  var firstPage = firstPageData || await fetchInterests(userId, status, 0, EXCLUDE_PAGE_SIZE);
+  addInterestIds(firstPage, ids);
+
+  var total = Number(firstPage && firstPage.total);
+  if (!isFinite(total) || total <= EXCLUDE_PAGE_SIZE) return ids;
+
+  var starts = [];
+  for (var start = EXCLUDE_PAGE_SIZE; start < total; start += EXCLUDE_PAGE_SIZE) {
+    starts.push(start);
+  }
+  for (var index = 0; index < starts.length; index += EXCLUDE_FETCH_CONCURRENCY) {
+    var batch = starts.slice(index, index + EXCLUDE_FETCH_CONCURRENCY);
+    var pages = await Promise.all(batch.map(function (pageStart) {
+      return fetchInterests(userId, status, pageStart, EXCLUDE_PAGE_SIZE);
+    }));
+    for (var p = 0; p < pages.length; p++) {
+      addInterestIds(pages[p], ids);
+    }
+  }
+  return ids;
+}
+
+function mergeIdSets(target, source) {
+  var keys = Object.keys(source || {});
+  for (var i = 0; i < keys.length; i++) {
+    target[keys[i]] = true;
+  }
+  return target;
+}
+
+async function collectExcludeIds(userId, doneFirstPage) {
+  var cached = await readExcludeCache(userId);
+  var firstPages = await Promise.all([
+    fetchInterests(userId, "mark", 0, EXCLUDE_PAGE_SIZE),
+    fetchInterests(userId, "doing", 0, EXCLUDE_PAGE_SIZE),
+  ]);
+  var markFirstPage = firstPages[0];
+  var doingFirstPage = firstPages[1];
+
+  if (cached) {
+    var recentIds = copyIdSet(cached.ids);
+    addInterestIds(doneFirstPage, recentIds);
+    addInterestIds(markFirstPage, recentIds);
+    addInterestIds(doingFirstPage, recentIds);
+    return recentIds;
+  }
+
+  var idSets = await Promise.all([
+    fetchAllInterestIds(userId, "done", doneFirstPage),
+    fetchAllInterestIds(userId, "mark", markFirstPage),
+    fetchAllInterestIds(userId, "doing", doingFirstPage),
+  ]);
+  var ids = {};
+  for (var i = 0; i < idSets.length; i++) {
+    mergeIdSets(ids, idSets[i]);
+  }
+  await writeExcludeCache(userId, ids);
+  return ids;
+}
+
 async function loadRecommendList(params) {
   try {
     params = params || {};
@@ -332,6 +451,11 @@ async function loadRecommendList(params) {
       if (seeds.length >= seedCount) break;
     }
 
+    var exclude = await collectExcludeIds(userId, doneData);
+    for (var s = 0; s < seeds.length; s++) {
+      exclude[String(seeds[s].id)] = true;
+    }
+
     var scoreMap = {};
     var itemMap = {};
     var tasks = seeds.map(function (seed) {
@@ -340,6 +464,7 @@ async function loadRecommendList(params) {
           var rec = recs[r];
           if (!rec || !rec.id) continue;
           var id = String(rec.id);
+          if (exclude[id]) continue;
           scoreMap[id] = (scoreMap[id] || 0) + 1;
           if (!itemMap[id]) {
             var video = toVideoItem(rec);

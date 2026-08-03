@@ -98,7 +98,7 @@ eval(fs.readFileSync("./widgets/douban.js", "utf8"));
   assert.equal(wish[0].type, "douban", "non-banner lists must retain built-in Douban details");
   assert.equal(wish[0].link, undefined);
 
-  assert.equal(WidgetMetadata.version, "1.2.3");
+  assert.equal(WidgetMetadata.version, "1.2.4");
   console.log("ok: all 20 hot items use TMDB-backed banner images");
 })().catch(function (error) {
   console.error(error);
