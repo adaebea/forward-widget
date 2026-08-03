@@ -322,8 +322,16 @@ function assertVideoItemShape(item, expected) {
     },
   };
   const enrichedWish = await toVideoItemWithTmdbPoster(SUBJECT_MOVIE);
-  assert.equal(enrichedWish.posterPath, "https://image.tmdb.org/t/p/w500/shawshank-poster.jpg");
-  assert.equal(enrichedWish.backdropPath, "https://image.tmdb.org/t/p/w500/shawshank-backdrop.jpg");
+  assert.deepEqual(enrichedWish, {
+    id: "movie.278",
+    type: "tmdb",
+    title: "肖申克的救赎",
+    mediaType: "movie",
+    posterPath: "/shawshank-poster.jpg",
+    backdropPath: "/shawshank-backdrop.jpg",
+    rating: undefined,
+    releaseDate: "1994-09-10",
+  });
   delete Widget.tmdb;
 
   const originalHttpGet = Widget.http.get;
@@ -364,9 +372,70 @@ function assertVideoItemShape(item, expected) {
     year: "2024",
     pic: { normal: "https://img.example.com/decagon.jpg" },
   });
-  assert.equal(enrichedOriginalTitle.posterPath, "https://image.tmdb.org/t/p/w500/decagon.jpg");
+  assert.equal(enrichedOriginalTitle.type, "tmdb");
+  assert.equal(enrichedOriginalTitle.id, "tv.251732");
+  assert.equal(enrichedOriginalTitle.posterPath, "/decagon.jpg");
+  // 兼容此前缓存过的 url 列表项；新条目直接由 Forward 的 TMDB 详情页加载。
+  const tmdbDetail = await loadDetail("https://movie.douban.com/subject/36700709/#forward-tmdb=tv.251732");
+  assert.deepEqual(tmdbDetail, { id: "tv.251732", type: "tmdb", mediaType: "tv" });
   Widget.http.get = originalHttpGet;
   delete Widget.tmdb;
+
+  // 豆瓣别名里的季度名应归一到整剧，优先使用 TMDB 的整剧条目作为封面和详情入口。
+  Widget.http.get = async (url, options) => {
+    if (/\/subject\/35161255$/.test(url)) {
+      return {
+        data: {
+          id: "35161255",
+          title: "伍六七之玄武国篇",
+          type: "tv",
+          year: "2021",
+          aka: ["刺客伍六七 第三季", "Scissor Seven 3"],
+        },
+      };
+    }
+    return originalHttpGet(url, options);
+  };
+  Widget.tmdb = {
+    get: async (api, options) => {
+      assert.equal(api, "search/tv");
+      if (options.params.query === "伍六七之玄武国篇") return { results: [] };
+      assert.equal(options.params.query, "刺客伍六七");
+      return {
+        results: [
+          {
+            id: 999,
+            name: "刺客伍六七 第三季",
+            poster_path: "/season-three.jpg",
+            first_air_date: "2021-01-01",
+          },
+          {
+            id: 888,
+            name: "刺客伍六七",
+            poster_path: "/scissor-seven.jpg",
+            backdrop_path: "/scissor-seven-backdrop.jpg",
+            first_air_date: "2018-04-25",
+          },
+        ],
+      };
+    },
+  };
+  const enrichedAliasTitle = await toVideoItemWithTmdbPoster({
+    id: "35161255",
+    title: "伍六七之玄武国篇",
+    type: "tv",
+    year: "2021",
+    pic: { normal: "https://img.example.com/scissor-seven.jpg" },
+  });
+  assert.equal(enrichedAliasTitle.type, "tmdb");
+  assert.equal(enrichedAliasTitle.id, "tv.888");
+  assert.equal(enrichedAliasTitle.posterPath, "/scissor-seven.jpg");
+  Widget.http.get = originalHttpGet;
+  delete Widget.tmdb;
+
+  assert.equal(tvBaseTitle("中国奇谭2"), "中国奇谭");
+  assert.equal(tvBaseTitle("机智的医生生活 第二季"), "机智的医生生活");
+  assert.equal(tvBaseTitle("Pachinko S1"), "Pachinko");
 
   const detail = await loadDetail(wish[0].link);
   assertVideoItemShape(detail, {

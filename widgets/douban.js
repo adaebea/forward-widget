@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.douban.personal",
   title: "豆瓣片单",
-  version: "1.2.7",
+  version: "1.3.0",
   requiredVersion: "0.0.1",
   description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门",
   author: "adaebea",
@@ -189,32 +189,124 @@ function findTmdbPosterMatch(subject, results) {
   var subjectTitle = normalizeTitle(subject && subject.title);
   var mediaType = toMediaType(subject);
   var subjectYear = String((subject && subject.year) || "");
-  var fallback = null;
+  var exactFallback = null;
+  var partialFallback = null;
   for (var i = 0; i < results.length; i++) {
     var result = results[i];
     if (!result || (!result.poster_path && !result.backdrop_path)) continue;
     var titles = [result.title, result.name, result.original_title, result.original_name];
-    var titleMatches = titles.some(function (title) {
+    var exactTitleMatch = titles.some(function (title) {
       var normalized = normalizeTitle(title);
       if (!normalized || !subjectTitle) return false;
-      if (normalized === subjectTitle) return true;
+      return normalized === subjectTitle;
+    });
+    var partialTitleMatch = titles.some(function (title) {
+      var normalized = normalizeTitle(title);
+      if (!normalized || !subjectTitle) return false;
       // 豆瓣常把季度写进标题，TMDB 的剧集标题通常是剧名本身。
       return mediaType === "tv" && (subjectTitle.indexOf(normalized) >= 0 || normalized.indexOf(subjectTitle) >= 0);
     });
-    if (!titleMatches) continue;
+    if (!exactTitleMatch && !partialTitleMatch) continue;
     var resultDate = result.release_date || result.first_air_date || "";
     var yearMatches = !subjectYear || !resultDate || String(resultDate).slice(0, 4) === subjectYear;
-    if (yearMatches) return result;
-    if (!fallback) fallback = result;
+    if (exactTitleMatch && yearMatches) return result;
+    if (exactTitleMatch && !exactFallback) exactFallback = result;
+    if (partialTitleMatch && !partialFallback) partialFallback = result;
   }
-  return fallback;
+  return exactFallback || partialFallback;
 }
 
 function tvBaseTitle(title) {
   return String(title || "")
-    .replace(/\s*第[一二三四五六七八九十百千万\d]+季.*$/, "")
-    .replace(/\s*season\s*\d+.*$/i, "")
+    .replace(/[（(]\s*(?:第\s*)?[一二三四五六七八九十百千万\d]+\s*季\s*[）)]\s*$/i, "")
+    .replace(/\s*(?:第\s*)?[一二三四五六七八九十百千万\d]+\s*季.*$/i, "")
+    .replace(/\s*(?:season|s)\s*\d+.*$/i, "")
+    // 中文剧名常把季度直接写成末尾数字（如“中国奇谭2”）；
+    // 仅在数字前是汉字时才剥离，避免误改纯数字或英文片名。
+    .replace(/([\u4e00-\u9fff])\s*\d+\s*$/, "$1")
     .trim();
+}
+
+function copySubjectWithTitle(subject, title, year) {
+  var copy = {};
+  var keys = Object.keys(subject || {});
+  for (var i = 0; i < keys.length; i++) {
+    copy[keys[i]] = subject[keys[i]];
+  }
+  copy.title = String(title || "");
+  if (year) copy.year = String(year);
+  return copy;
+}
+
+function addTmdbTitleCandidate(candidates, seen, subject, title, year) {
+  var value = String(title || "").trim();
+  if (!value) return;
+  var variants = [value];
+  // 入口卡片要使用整剧海报：对剧集先检索去季名后的总剧名，再保留
+  // 原始季名作为兜底。详情入口会跳到命中的 TMDB 整剧详情页。
+  if (toMediaType(subject) === "tv") {
+    var baseTitle = tvBaseTitle(value);
+    if (baseTitle && baseTitle !== value) variants.unshift(baseTitle);
+  }
+  for (var i = 0; i < variants.length; i++) {
+    var normalized = normalizeTitle(variants[i]);
+    if (!normalized || seen[normalized]) continue;
+    seen[normalized] = true;
+    candidates.push({
+      subject: copySubjectWithTitle(subject, variants[i], year),
+      query: variants[i],
+      includeYear: toMediaType(subject) !== "tv" && candidates.length === 0,
+    });
+  }
+}
+
+function buildTmdbTitleCandidates(subject, detail, includeSubjectTitle) {
+  var candidates = [];
+  var seen = {};
+  if (includeSubjectTitle !== false) {
+    addTmdbTitleCandidate(candidates, seen, subject, subject && subject.title, subject && subject.year);
+  }
+  if (!detail) return candidates;
+  addTmdbTitleCandidate(candidates, seen, subject, detail.original_title || detail.original_name, detail.year || (subject && subject.year));
+  var aliases = Array.isArray(detail.aka) ? detail.aka : [];
+  for (var i = 0; i < aliases.length; i++) {
+    addTmdbTitleCandidate(candidates, seen, subject, aliases[i], detail.year || (subject && subject.year));
+  }
+  return candidates;
+}
+
+async function findTmdbPosterFromCandidates(candidates) {
+  for (var i = 0; i < candidates.length; i++) {
+    var candidate = candidates[i];
+    var match = await findTmdbPoster(candidate.subject, candidate.query, candidate.includeYear);
+    if (match) return match;
+  }
+  return null;
+}
+
+function tmdbDetailLink(link, mediaType, tmdbId) {
+  if (!link || !tmdbId) return link;
+  return String(link) + "#forward-tmdb=" + mediaType + "." + tmdbId;
+}
+
+function toNativeTmdbItem(subject, match) {
+  var mediaType = toMediaType(subject);
+  var rating = typeof match.vote_average === "number" && match.vote_average > 0
+    ? match.vote_average
+    : undefined;
+  // 使用 Forward 的标准 TMDB 身份，而不是把 TMDB 图片塞进 url 条目。
+  // 这样 App 会走与本地视频文件相同的内置媒体识别、封面和详情路径。
+  return {
+    id: mediaType + "." + match.id,
+    type: "tmdb",
+    title: subject.title || match.title || match.name || "",
+    mediaType: mediaType,
+    // 对 tmdb 类型传原始路径，由 App 自己拼接并管理图片缓存。
+    posterPath: match.poster_path || undefined,
+    backdropPath: match.backdrop_path || match.poster_path || undefined,
+    rating: rating,
+    releaseDate: match.release_date || match.first_air_date || resolveReleaseDate(subject),
+  };
 }
 
 async function toVideoItemWithTmdbPoster(subject) {
@@ -222,34 +314,16 @@ async function toVideoItemWithTmdbPoster(subject) {
   if (!item || !Widget.tmdb || typeof Widget.tmdb.get !== "function") return item;
   try {
     var mediaType = toMediaType(subject);
-    var match = await findTmdbPoster(subject, subject.title, true);
-    if (!match && mediaType === "tv") {
-      var baseTitle = tvBaseTitle(subject.title);
-      if (baseTitle && baseTitle !== subject.title) {
-        match = await findTmdbPoster(subject, baseTitle, false);
-      }
-    }
+    var match = await findTmdbPosterFromCandidates(buildTmdbTitleCandidates(subject));
     if (!match) {
       var detail = await fetchSubjectDetail(subject.id);
-      var originalTitle = detail && (detail.original_title || detail.original_name);
-      if (originalTitle && normalizeTitle(originalTitle) !== normalizeTitle(subject.title)) {
-        var subjectWithOriginalTitle = {};
-        var subjectKeys = Object.keys(subject);
-        for (var keyIndex = 0; keyIndex < subjectKeys.length; keyIndex++) {
-          subjectWithOriginalTitle[subjectKeys[keyIndex]] = subject[subjectKeys[keyIndex]];
-        }
-        subjectWithOriginalTitle.title = String(originalTitle);
-        if (detail.year) subjectWithOriginalTitle.year = detail.year;
-        match = await findTmdbPoster(subjectWithOriginalTitle, originalTitle, false);
-      }
+      // 初始中文标题已经查过，此处只补查豆瓣详情中的原名和别名，
+      // 避免每个未命中条目重复发起同一条 TMDB 搜索。
+      match = await findTmdbPosterFromCandidates(buildTmdbTitleCandidates(subject, detail, false));
     }
     if (!match) return item;
-    var posterUrl = tmdbImageUrl(match.poster_path || match.backdrop_path);
-    if (!posterUrl) return item;
-    item.coverUrl = posterUrl;
-    item.posterPath = posterUrl;
-    item.backdropPath = tmdbImageUrl(match.backdrop_path || match.poster_path);
-    return item;
+    if (!match.poster_path && !match.backdrop_path) return item;
+    return toNativeTmdbItem(subject, match);
   } catch (error) {
     console.error("[douban] TMDB poster lookup failed", subject && subject.id, error.message || error);
     return item;
@@ -357,6 +431,14 @@ async function mapInterestsWithTmdbPosters(data) {
 }
 
 async function loadDetail(link) {
+  var tmdbMatch = String(link || "").match(/#forward-tmdb=(tv|movie)\.(\d+)$/);
+  if (tmdbMatch) {
+    return {
+      id: tmdbMatch[1] + "." + tmdbMatch[2],
+      type: "tmdb",
+      mediaType: tmdbMatch[1],
+    };
+  }
   var match = String(link || "").match(/movie\.douban\.com\/subject\/(\d+)/);
   if (!match) return null;
   try {
