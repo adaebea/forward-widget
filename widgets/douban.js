@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.douban.personal",
   title: "豆瓣片单",
-  version: "1.3.0",
+  version: "1.3.1",
   requiredVersion: "0.0.1",
   description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门",
   author: "adaebea",
@@ -294,12 +294,16 @@ function toNativeTmdbItem(subject, match) {
   var rating = typeof match.vote_average === "number" && match.vote_average > 0
     ? match.vote_average
     : undefined;
+  var nativeTitle = match.title || match.name || match.original_title || match.original_name || subject.title || "";
+  // 列表入口必须和 TMDB 详情、资源匹配使用同一个“整剧”标题，
+  // 不能继续沿用豆瓣的“第一季/第二季”等季名。
+  if (mediaType === "tv") nativeTitle = tvBaseTitle(nativeTitle) || tvBaseTitle(subject.title) || nativeTitle;
   // 使用 Forward 的标准 TMDB 身份，而不是把 TMDB 图片塞进 url 条目。
   // 这样 App 会走与本地视频文件相同的内置媒体识别、封面和详情路径。
   return {
     id: mediaType + "." + match.id,
     type: "tmdb",
-    title: subject.title || match.title || match.name || "",
+    title: nativeTitle,
     mediaType: mediaType,
     // 对 tmdb 类型传原始路径，由 App 自己拼接并管理图片缓存。
     posterPath: match.poster_path || undefined,

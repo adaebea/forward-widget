@@ -429,6 +429,7 @@ function assertVideoItemShape(item, expected) {
   });
   assert.equal(enrichedAliasTitle.type, "tmdb");
   assert.equal(enrichedAliasTitle.id, "tv.888");
+  assert.equal(enrichedAliasTitle.title, "刺客伍六七");
   assert.equal(enrichedAliasTitle.posterPath, "/scissor-seven.jpg");
   Widget.http.get = originalHttpGet;
   delete Widget.tmdb;
@@ -436,6 +437,13 @@ function assertVideoItemShape(item, expected) {
   assert.equal(tvBaseTitle("中国奇谭2"), "中国奇谭");
   assert.equal(tvBaseTitle("机智的医生生活 第二季"), "机智的医生生活");
   assert.equal(tvBaseTitle("Pachinko S1"), "Pachinko");
+  assert.equal(
+    toNativeTmdbItem(
+      { title: "机智的医生生活 第二季", type: "tv" },
+      { id: 9999, name: "机智的医生生活 第二季", poster_path: "/hospital.jpg" }
+    ).title,
+    "机智的医生生活"
+  );
 
   const detail = await loadDetail(wish[0].link);
   assertVideoItemShape(detail, {
