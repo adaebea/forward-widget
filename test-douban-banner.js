@@ -95,10 +95,10 @@ eval(fs.readFileSync("./widgets/douban.js", "utf8"));
   );
 
   var wish = await loadWishList({ userId: "test", page: 1, count: 20 });
-  assert.equal(wish[0].type, "douban", "non-banner lists must retain built-in Douban details");
-  assert.equal(wish[0].link, undefined);
+  assert.equal(wish[0].type, "url", "non-banner lists must render their Douban-returned fields directly");
+  assert.equal(wish[0].link, "https://movie.douban.com/subject/37000001/");
 
-  assert.equal(WidgetMetadata.version, "1.2.4");
+  assert.equal(WidgetMetadata.version, "1.2.5");
   console.log("ok: all 20 hot items use TMDB-backed banner images");
 })().catch(function (error) {
   console.error(error);

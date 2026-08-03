@@ -218,6 +218,15 @@ global.Widget = {
         return { data: [] };
       }
 
+      // direct detail page for url-type items
+      const detailMatch = p.match(/\/subject\/(\d+)$/);
+      if (detailMatch) {
+        const subjectId = detailMatch[1];
+        const subjects = [SUBJECT_MOVIE, SUBJECT_TV, SUBJECT_OWNED, SUBJECT_REC_A, SUBJECT_REC_B];
+        const subject = subjects.find((item) => item.id === subjectId);
+        if (subject) return { data: Object.assign({ intro: "豆瓣详情简介" }, subject) };
+      }
+
       // hot charts
       const chartMatch = p.match(/\/subject_collection\/([^/]+)\/items$/);
       if (chartMatch) {
@@ -260,8 +269,9 @@ if (!fs.existsSync(abs)) {
 eval(fs.readFileSync(abs, "utf8"));
 
 function assertVideoItemShape(item, expected) {
-  assert.equal(item.type, "douban");
-  assert.equal(item.id, expected.id);
+  assert.equal(item.type, "url");
+  assert.equal(item.id, `https://movie.douban.com/subject/${expected.id}/`);
+  assert.equal(item.link, item.id);
   assert.equal(item.title, expected.title);
   assert.equal(item.posterPath, expected.poster);
   assert.equal(item.mediaType, expected.mediaType);
@@ -296,6 +306,14 @@ function assertVideoItemShape(item, expected) {
     calls.some((c) => /status=mark/.test(c.url) && /user\/ahbei\/interests/.test(c.url)),
     "wish must request status=mark"
   );
+  const detail = await loadDetail(wish[0].link);
+  assertVideoItemShape(detail, {
+    id: "1292052",
+    title: "肖申克的救赎",
+    poster: "https://img.example.com/shawshank.jpg",
+    mediaType: "movie",
+  });
+  assert.equal(detail.description, "豆瓣详情简介");
 
   // --- watching list ---
   calls.length = 0;
@@ -320,7 +338,7 @@ function assertVideoItemShape(item, expected) {
     minRating: "4",
     seedCount: "8",
   });
-  const recIds = recs.map((r) => String(r.id));
+  const recIds = recs.map((r) => String(r.id).match(/subject\/(\d+)/)?.[1]);
   assert.ok(recIds.includes("1292720"), "should include 阿甘正传");
   assert.ok(recIds.includes("1292064"), "should include 楚门的世界");
   assert.ok(!recIds.includes("26752088"), "must exclude already-watched seed");
@@ -333,7 +351,7 @@ function assertVideoItemShape(item, expected) {
     "must not stop excluding watched items after the first 1,000 records"
   );
   for (const item of recs) {
-    assert.equal(item.type, "douban");
+    assert.equal(item.type, "url");
     assert.equal(item.poster_path, undefined);
   }
   // request assertions: done + mark + doing + recommendations for high-rated seed only

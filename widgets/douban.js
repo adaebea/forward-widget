@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.douban.personal",
   title: "豆瓣片单",
-  version: "1.2.4",
+  version: "1.2.5",
   requiredVersion: "0.0.1",
   description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门",
   author: "adaebea",
@@ -138,15 +138,35 @@ function buildDescription(subject) {
   return parts.join("\n");
 }
 
+function doubanSubjectUrl(subject) {
+  if (subject && subject.url) return String(subject.url);
+  return "https://movie.douban.com/subject/" + encodeURIComponent(subject.id) + "/";
+}
+
+function resolveReleaseDate(subject) {
+  if (subject && subject.release_date) return String(subject.release_date);
+  var dates = (subject && subject.pubdate) || [];
+  if (!Array.isArray(dates)) dates = [dates];
+  for (var i = 0; i < dates.length; i++) {
+    var match = String(dates[i] || "").match(/\d{4}-\d{2}-\d{2}/);
+    if (match) return match[0];
+  }
+  return subject && subject.year ? String(subject.year) : undefined;
+}
+
 function toVideoItem(subject) {
   if (!subject || !subject.id) return null;
   var rating = subject.rating || {};
   var ratingValue = typeof rating.value === "number" ? rating.value : undefined;
   if (ratingValue === 0) ratingValue = undefined;
   var posterUrl = resolvePoster(subject);
+  var link = doubanSubjectUrl(subject);
   return {
-    id: String(subject.id),
-    type: "douban",
+    // `douban` 类型会由 App 按内置数据源重新匹配，可能覆盖或丢掉
+    // 豆瓣接口刚返回的条目。使用 url 保留列表中返回的标题、日期和海报。
+    id: link,
+    type: "url",
+    link: link,
     title: subject.title || "",
     coverUrl: posterUrl,
     posterPath: posterUrl,
@@ -154,7 +174,7 @@ function toVideoItem(subject) {
     rating: ratingValue,
     mediaType: toMediaType(subject),
     description: buildDescription(subject),
-    releaseDate: subject.year ? String(subject.year) : subject.release_date || undefined,
+    releaseDate: resolveReleaseDate(subject),
   };
 }
 
@@ -220,6 +240,22 @@ function mapInterests(data) {
     if (item) items.push(item);
   }
   return items;
+}
+
+async function loadDetail(link) {
+  var match = String(link || "").match(/movie\.douban\.com\/subject\/(\d+)/);
+  if (!match) return null;
+  try {
+    var url = DOUBAN_API + "/subject/" + encodeURIComponent(match[1]);
+    var res = await Widget.http.get(url, { headers: DOUBAN_HEADERS });
+    var subject = res && res.data;
+    var item = toVideoItem(subject);
+    if (item && subject && subject.intro) item.description = String(subject.intro);
+    return item;
+  } catch (error) {
+    console.error("[douban] loadDetail 失败:", error.message || error);
+    throw error;
+  }
 }
 
 async function toTmdbBannerItem(subject) {
