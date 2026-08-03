@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.douban.personal",
   title: "豆瓣片单",
-  version: "1.2.5",
+  version: "1.2.6",
   requiredVersion: "0.0.1",
   description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门",
   author: "adaebea",
@@ -178,6 +178,86 @@ function toVideoItem(subject) {
   };
 }
 
+function tmdbImageUrl(path) {
+  if (!path) return "";
+  var value = String(path);
+  if (/^https?:\/\//i.test(value)) return value;
+  return "https://image.tmdb.org/t/p/w500" + value;
+}
+
+function findTmdbPosterMatch(subject, results) {
+  var subjectTitle = normalizeTitle(subject && subject.title);
+  var mediaType = toMediaType(subject);
+  var subjectYear = String((subject && subject.year) || "");
+  var fallback = null;
+  for (var i = 0; i < results.length; i++) {
+    var result = results[i];
+    if (!result || (!result.poster_path && !result.backdrop_path)) continue;
+    var titles = [result.title, result.name, result.original_title, result.original_name];
+    var titleMatches = titles.some(function (title) {
+      var normalized = normalizeTitle(title);
+      if (!normalized || !subjectTitle) return false;
+      if (normalized === subjectTitle) return true;
+      // 豆瓣常把季度写进标题，TMDB 的剧集标题通常是剧名本身。
+      return mediaType === "tv" && (subjectTitle.indexOf(normalized) >= 0 || normalized.indexOf(subjectTitle) >= 0);
+    });
+    if (!titleMatches) continue;
+    var resultDate = result.release_date || result.first_air_date || "";
+    var yearMatches = !subjectYear || !resultDate || String(resultDate).slice(0, 4) === subjectYear;
+    if (yearMatches) return result;
+    if (!fallback) fallback = result;
+  }
+  return fallback;
+}
+
+function tvBaseTitle(title) {
+  return String(title || "")
+    .replace(/\s*第[一二三四五六七八九十百千万\d]+季.*$/, "")
+    .replace(/\s*season\s*\d+.*$/i, "")
+    .trim();
+}
+
+async function toVideoItemWithTmdbPoster(subject) {
+  var item = toVideoItem(subject);
+  if (!item || !Widget.tmdb || typeof Widget.tmdb.get !== "function") return item;
+  try {
+    var mediaType = toMediaType(subject);
+    var searchParams = {
+      query: subject.title,
+      language: "zh-CN",
+      include_adult: false,
+    };
+    if (subject.year) {
+      if (mediaType === "tv") searchParams.first_air_date_year = String(subject.year);
+      else searchParams.year = String(subject.year);
+    }
+    var data = await Widget.tmdb.get("search/" + mediaType, { params: searchParams });
+    var match = findTmdbPosterMatch(subject, (data && data.results) || []);
+    if (!match && mediaType === "tv") {
+      var baseTitle = tvBaseTitle(subject.title);
+      if (baseTitle && baseTitle !== subject.title) {
+        var fallbackParams = {
+          query: baseTitle,
+          language: "zh-CN",
+          include_adult: false,
+        };
+        var fallbackData = await Widget.tmdb.get("search/tv", { params: fallbackParams });
+        match = findTmdbPosterMatch(subject, (fallbackData && fallbackData.results) || []);
+      }
+    }
+    if (!match) return item;
+    var posterUrl = tmdbImageUrl(match.poster_path || match.backdrop_path);
+    if (!posterUrl) return item;
+    item.coverUrl = posterUrl;
+    item.posterPath = posterUrl;
+    item.backdropPath = tmdbImageUrl(match.backdrop_path || match.poster_path);
+    return item;
+  } catch (error) {
+    console.error("[douban] TMDB poster lookup failed", subject && subject.id, error.message || error);
+    return item;
+  }
+}
+
 async function fetchInterests(userId, status, start, count) {
   var url =
     DOUBAN_API +
@@ -242,6 +322,15 @@ function mapInterests(data) {
   return items;
 }
 
+async function mapInterestsWithTmdbPosters(data) {
+  var list = (data && data.interests) || [];
+  var tasks = list.map(function (interest) {
+    return toVideoItemWithTmdbPoster(interest && interest.subject);
+  });
+  var items = await Promise.all(tasks);
+  return items.filter(Boolean);
+}
+
 async function loadDetail(link) {
   var match = String(link || "").match(/movie\.douban\.com\/subject\/(\d+)/);
   if (!match) return null;
@@ -249,7 +338,7 @@ async function loadDetail(link) {
     var url = DOUBAN_API + "/subject/" + encodeURIComponent(match[1]);
     var res = await Widget.http.get(url, { headers: DOUBAN_HEADERS });
     var subject = res && res.data;
-    var item = toVideoItem(subject);
+    var item = await toVideoItemWithTmdbPoster(subject);
     if (item && subject && subject.intro) item.description = String(subject.intro);
     return item;
   } catch (error) {
@@ -331,7 +420,7 @@ async function loadStatusList(params, status) {
     var userId = requireUserId(params);
     var p = pageParams(params);
     var data = await fetchInterests(userId, status, p.start, p.count);
-    var items = mapInterests(data);
+    var items = await mapInterestsWithTmdbPosters(data);
     return items;
   } catch (error) {
     console.error("[douban] loadStatusList(" + status + ") 失败:", error.message || error);
@@ -494,6 +583,7 @@ async function loadRecommendList(params) {
 
     var scoreMap = {};
     var itemMap = {};
+    var subjectMap = {};
     var tasks = seeds.map(function (seed) {
       return fetchRecommendations(seed.id).then(function (recs) {
         for (var r = 0; r < recs.length; r++) {
@@ -504,7 +594,10 @@ async function loadRecommendList(params) {
           scoreMap[id] = (scoreMap[id] || 0) + 1;
           if (!itemMap[id]) {
             var video = toVideoItem(rec);
-            if (video) itemMap[id] = video;
+            if (video) {
+              itemMap[id] = video;
+              subjectMap[id] = rec;
+            }
           }
         }
       });
@@ -521,10 +614,10 @@ async function loadRecommendList(params) {
       return rb - ra;
     });
 
-    var items = ranked.slice(p.start, p.start + p.count).map(function (row) {
-      return row.item;
-    });
-    return items;
+    var pageRows = ranked.slice(p.start, p.start + p.count);
+    return Promise.all(pageRows.map(function (row) {
+      return toVideoItemWithTmdbPoster(subjectMap[row.id]);
+    }));
   } catch (error) {
     console.error("[douban] loadRecommendList 失败:", error.message || error);
     throw error;

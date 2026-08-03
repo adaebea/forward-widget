@@ -306,6 +306,25 @@ function assertVideoItemShape(item, expected) {
     calls.some((c) => /status=mark/.test(c.url) && /user\/ahbei\/interests/.test(c.url)),
     "wish must request status=mark"
   );
+  Widget.tmdb = {
+    get: async (api, options) => {
+      assert.equal(api, "search/movie");
+      assert.equal(options.params.query, "肖申克的救赎");
+      return {
+        results: [{
+          id: 278,
+          title: "肖申克的救赎",
+          poster_path: "/shawshank-poster.jpg",
+          backdrop_path: "/shawshank-backdrop.jpg",
+          release_date: "1994-09-10",
+        }],
+      };
+    },
+  };
+  const enrichedWish = await toVideoItemWithTmdbPoster(SUBJECT_MOVIE);
+  assert.equal(enrichedWish.posterPath, "https://image.tmdb.org/t/p/w500/shawshank-poster.jpg");
+  assert.equal(enrichedWish.backdropPath, "https://image.tmdb.org/t/p/w500/shawshank-backdrop.jpg");
+  delete Widget.tmdb;
   const detail = await loadDetail(wish[0].link);
   assertVideoItemShape(detail, {
     id: "1292052",
