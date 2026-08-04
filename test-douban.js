@@ -323,7 +323,7 @@ function assertVideoItemShape(item, expected) {
   };
   const enrichedWish = await toVideoItemWithTmdbPoster(SUBJECT_MOVIE);
   assert.deepEqual(enrichedWish, {
-    id: "movie.278",
+    id: 278,
     type: "tmdb",
     title: "肖申克的救赎",
     mediaType: "movie",
@@ -373,11 +373,11 @@ function assertVideoItemShape(item, expected) {
     pic: { normal: "https://img.example.com/decagon.jpg" },
   });
   assert.equal(enrichedOriginalTitle.type, "tmdb");
-  assert.equal(enrichedOriginalTitle.id, "tv.251732");
+  assert.equal(enrichedOriginalTitle.id, 251732);
   assert.equal(enrichedOriginalTitle.posterPath, "/decagon.jpg");
   // 兼容此前缓存过的 url 列表项；新条目直接由 Forward 的 TMDB 详情页加载。
   const tmdbDetail = await loadDetail("https://movie.douban.com/subject/36700709/#forward-tmdb=tv.251732");
-  assert.deepEqual(tmdbDetail, { id: "tv.251732", type: "tmdb", mediaType: "tv" });
+  assert.deepEqual(tmdbDetail, { id: 251732, type: "tmdb", mediaType: "tv" });
   Widget.http.get = originalHttpGet;
   delete Widget.tmdb;
 
@@ -428,7 +428,7 @@ function assertVideoItemShape(item, expected) {
     pic: { normal: "https://img.example.com/scissor-seven.jpg" },
   });
   assert.equal(enrichedAliasTitle.type, "tmdb");
-  assert.equal(enrichedAliasTitle.id, "tv.888");
+  assert.equal(enrichedAliasTitle.id, 888);
   assert.equal(enrichedAliasTitle.title, "刺客伍六七");
   assert.equal(enrichedAliasTitle.posterPath, "/scissor-seven.jpg");
   Widget.http.get = originalHttpGet;
