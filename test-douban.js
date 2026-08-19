@@ -434,6 +434,65 @@ function assertVideoItemShape(item, expected) {
   Widget.http.get = originalHttpGet;
   delete Widget.tmdb;
 
+  // 模糊中文标题不能命中包含它的另一部剧；应继续查询豆瓣原名。
+  let tedDetailRequests = 0;
+  const tedQueries = [];
+  Widget.http.get = async (url, options) => {
+    if (/\/subject\/36727918$/.test(url)) {
+      tedDetailRequests += 1;
+      return {
+        data: {
+          id: "36727918",
+          title: "足球教练 第四季",
+          original_title: "Ted Lasso",
+          type: "tv",
+          year: "2026",
+        },
+      };
+    }
+    return originalHttpGet(url, options);
+  };
+  Widget.tmdb = {
+    get: async (api, options) => {
+      assert.equal(api, "search/tv");
+      tedQueries.push(options.params.query);
+      if (options.params.query === "Ted Lasso") {
+        return {
+          results: [{
+            id: 97546,
+            name: "Ted Lasso",
+            original_name: "Ted Lasso",
+            poster_path: "/ted-lasso.jpg",
+            first_air_date: "2020-08-14",
+          }],
+        };
+      }
+      return {
+        results: [{
+          id: 123456,
+          name: "我的足球教练",
+          original_name: "My Coach",
+          poster_path: "/my-coach.jpg",
+          first_air_date: "2022-06-07",
+        }],
+      };
+    },
+  };
+  const enrichedTedLasso = await toVideoItemWithTmdbPoster({
+    id: "36727918",
+    title: "足球教练 第四季",
+    type: "tv",
+    year: "2026",
+    pic: { normal: "https://img.example.com/ted-lasso.jpg" },
+  });
+  assert.equal(enrichedTedLasso.type, "tmdb");
+  assert.equal(enrichedTedLasso.id, 97546, "must not use the partial title match for My Coach");
+  assert.equal(enrichedTedLasso.title, "Ted Lasso");
+  assert.equal(tedDetailRequests, 1, "must fetch the Douban original title after no exact match");
+  assert.deepEqual(tedQueries, ["足球教练", "足球教练 第四季", "Ted Lasso"]);
+  Widget.http.get = originalHttpGet;
+  delete Widget.tmdb;
+
   assert.equal(tvBaseTitle("中国奇谭2"), "中国奇谭");
   assert.equal(tvBaseTitle("机智的医生生活 第二季"), "机智的医生生活");
   assert.equal(tvBaseTitle("Pachinko S1"), "Pachinko");

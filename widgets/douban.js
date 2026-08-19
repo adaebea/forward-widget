@@ -187,10 +187,8 @@ function tmdbImageUrl(path) {
 
 function findTmdbPosterMatch(subject, results) {
   var subjectTitle = normalizeTitle(subject && subject.title);
-  var mediaType = toMediaType(subject);
   var subjectYear = String((subject && subject.year) || "");
   var exactFallback = null;
-  var partialFallback = null;
   for (var i = 0; i < results.length; i++) {
     var result = results[i];
     if (!result || (!result.poster_path && !result.backdrop_path)) continue;
@@ -200,20 +198,16 @@ function findTmdbPosterMatch(subject, results) {
       if (!normalized || !subjectTitle) return false;
       return normalized === subjectTitle;
     });
-    var partialTitleMatch = titles.some(function (title) {
-      var normalized = normalizeTitle(title);
-      if (!normalized || !subjectTitle) return false;
-      // 豆瓣常把季度写进标题，TMDB 的剧集标题通常是剧名本身。
-      return mediaType === "tv" && (subjectTitle.indexOf(normalized) >= 0 || normalized.indexOf(subjectTitle) >= 0);
-    });
-    if (!exactTitleMatch && !partialTitleMatch) continue;
+    // 不接受“标题包含”作为命中：例如“足球教练”会误命中泰剧
+    // “我的足球教练”。季度名会在候选生成阶段单独处理；未精确命中时，
+    // 再回退用豆瓣详情中的原名和别名查询。
+    if (!exactTitleMatch) continue;
     var resultDate = result.release_date || result.first_air_date || "";
     var yearMatches = !subjectYear || !resultDate || String(resultDate).slice(0, 4) === subjectYear;
     if (exactTitleMatch && yearMatches) return result;
     if (exactTitleMatch && !exactFallback) exactFallback = result;
-    if (partialTitleMatch && !partialFallback) partialFallback = result;
   }
-  return exactFallback || partialFallback;
+  return exactFallback;
 }
 
 function tvBaseTitle(title) {
