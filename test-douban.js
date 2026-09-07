@@ -494,7 +494,7 @@ function assertVideoItemShape(item, expected) {
   delete Widget.tmdb;
 
   assert.equal(tvBaseTitle("中国奇谭2"), "中国奇谭");
-  // 来自豆瓣 37926820 的原名；去季名后仍必须精确匹配整剧。
+  // 使用已核实的 TMDB 244601 名称，不能假设 TMDB 与豆瓣原名相同。
   const communityQueries = [];
   Widget.http.get = async () => ({ data: {
     original_title: "사상검증구역: 더 커뮤니티 2",
@@ -504,9 +504,9 @@ function assertVideoItemShape(item, expected) {
     assert.equal(api, "search/tv");
     communityQueries.push(options.params.query);
     return { results: [{
-      id: 999001,
-      name: "思想验证区域：The Community",
-      original_name: "사상검증구역: 더 커뮤니티",
+      id: 244601,
+      name: "思想验证区域：社群",
+      original_name: "더 커뮤니티",
       poster_path: "/community-test-poster.jpg",
       first_air_date: "2024-01-26",
     }] };
@@ -515,9 +515,18 @@ function assertVideoItemShape(item, expected) {
     id: "37926820", title: "思想验证区域 第二季", type: "tv", year: "2026",
   });
   assert.equal(communityMatch.type, "tmdb");
-  assert.equal(communityMatch.id, 999001);
+  assert.equal(communityMatch.id, 244601);
+  assert.equal(communityMatch.title, "思想验证区域：社群");
   assert.equal(communityMatch.posterPath, "/community-test-poster.jpg");
-  assert.deepEqual(communityQueries, ["思想验证区域", "思想验证区域 第二季", "사상검증구역: 더 커뮤니티"]);
+  assert.deepEqual(communityQueries, [
+    "思想验证区域", "思想验证区域 第二季",
+    "사상검증구역: 더 커뮤니티", "사상검증구역: 더 커뮤니티 2", "더 커뮤니티",
+  ]);
+  assert.equal(tvSeasonNumber("思想验证区域 第二季"), 2);
+  assert.equal(tvSeasonNumber("Example Season 12"), 12);
+  assert.equal(tvAliasBaseTitle("더 커뮤니티2: 보이지 않는 손", 2), "더 커뮤니티");
+  assert.equal(tvAliasBaseTitle("The Community 2: Invisible Hand", 2), "The Community");
+  assert.equal(tvAliasBaseTitle("合法副本 3", 2), "合法副本 3", "must only strip the matching season");
   const unchangedKorean = buildTmdbTitleCandidates({
     title: "普通剧名", type: "tv",
   }, { original_title: "테스트 2" }, false);

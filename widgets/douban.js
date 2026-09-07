@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.douban.personal",
   title: "豆瓣片单",
-  version: "1.3.4",
+  version: "1.3.5",
   requiredVersion: "0.0.1",
   description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门",
   author: "adaebea",
@@ -224,6 +224,40 @@ function tvBaseTitle(title) {
     .trim();
 }
 
+function chineseSeasonNumber(value) {
+  var digits = { "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+    "六": 6, "七": 7, "八": 8, "九": 9 };
+  var text = String(value || "");
+  if (/^\d+$/.test(text)) return Number(text);
+  if (text === "十") return 10;
+  var parts = text.split("十");
+  if (parts.length === 2) {
+    var tens = parts[0] ? digits[parts[0]] : 1;
+    var ones = parts[1] ? digits[parts[1]] : 0;
+    if (typeof tens === "number" && typeof ones === "number") return tens * 10 + ones;
+  }
+  return text.length === 1 && typeof digits[text] === "number" ? digits[text] : null;
+}
+
+function tvSeasonNumber(title) {
+  var value = String(title || "");
+  var match = value.match(/第\s*([一二三四五六七八九十\d]+)\s*季/i);
+  if (match) return chineseSeasonNumber(match[1]);
+  match = value.match(/(?:season|s)\s*(\d+)/i);
+  if (match) return Number(match[1]);
+  match = value.match(/[\u4e00-\u9fff]\s*(\d+)\s*$/);
+  return match ? Number(match[1]) : null;
+}
+
+function tvAliasBaseTitle(title, seasonNumber) {
+  var value = String(title || "").trim();
+  if (!value || !seasonNumber) return value;
+  // 豆瓣的跨语言别名常以“2: 副标题”或末尾“2”表示季度。
+  // 只有源标题已明确给出同一季数时才生成整剧名候选。
+  var numericSeason = new RegExp("\\s*" + seasonNumber + "\\s*(?:[:：\\-—–].*)?$");
+  return value.replace(numericSeason, "").trim();
+}
+
 function copySubjectWithTitle(subject, title, year) {
   var copy = {};
   var keys = Object.keys(subject || {});
@@ -243,10 +277,9 @@ function addTmdbTitleCandidate(candidates, seen, subject, title, year) {
   // 原始季名作为兜底。详情入口会跳到命中的 TMDB 整剧详情页。
   if (toMediaType(subject) === "tv") {
     var baseTitle = tvBaseTitle(value);
-    // 豆瓣中文标题明确标注季度时，韩文原名也可能仅以数字标季。
-    // 仅处理韩文结尾 + 数字，避免改动英文片名或本身带数字的剧名。
-    if (/第\s*[一二三四五六七八九十百千万\d]+\s*季/.test(String(subject.title || ""))) {
-      baseTitle = baseTitle.replace(/([\uac00-\ud7af])\s*[1-9]\d?\s*$/, "$1").trim();
+    var aliasBaseTitle = tvAliasBaseTitle(value, tvSeasonNumber(subject && subject.title));
+    if (aliasBaseTitle && aliasBaseTitle !== value && aliasBaseTitle !== baseTitle) {
+      variants.unshift(aliasBaseTitle);
     }
     if (baseTitle && baseTitle !== value) variants.unshift(baseTitle);
   }
