@@ -494,8 +494,56 @@ function assertVideoItemShape(item, expected) {
   delete Widget.tmdb;
 
   assert.equal(tvBaseTitle("中国奇谭2"), "中国奇谭");
+  // 来自豆瓣 37926820 的原名；去季名后仍必须精确匹配整剧。
+  const communityQueries = [];
+  Widget.http.get = async () => ({ data: {
+    original_title: "사상검증구역: 더 커뮤니티 2",
+    aka: ["더 커뮤니티2: 보이지 않는 손", "The Community 2: 看不见的手"],
+  } });
+  Widget.tmdb = { get: async (api, options) => {
+    assert.equal(api, "search/tv");
+    communityQueries.push(options.params.query);
+    return { results: [{
+      id: 999001,
+      name: "思想验证区域：The Community",
+      original_name: "사상검증구역: 더 커뮤니티",
+      poster_path: "/community-test-poster.jpg",
+      first_air_date: "2024-01-26",
+    }] };
+  } };
+  const communityMatch = await toVideoItemWithTmdbPoster({
+    id: "37926820", title: "思想验证区域 第二季", type: "tv", year: "2026",
+  });
+  assert.equal(communityMatch.type, "tmdb");
+  assert.equal(communityMatch.id, 999001);
+  assert.equal(communityMatch.posterPath, "/community-test-poster.jpg");
+  assert.deepEqual(communityQueries, ["思想验证区域", "思想验证区域 第二季", "사상검증구역: 더 커뮤니티"]);
+  const unchangedKorean = buildTmdbTitleCandidates({
+    title: "普通剧名", type: "tv",
+  }, { original_title: "테스트 2" }, false);
+  assert.deepEqual(unchangedKorean.map(c => c.query), ["테스트 2"]);
+  Widget.http.get = originalHttpGet;
+  delete Widget.tmdb;
   assert.equal(tvBaseTitle("机智的医生生活 第二季"), "机智的医生生活");
   assert.equal(tvBaseTitle("Pachinko S1"), "Pachinko");
+  const communitySeason = {
+    id: "test-community-season-two",
+    title: "思想验证区域 第二季",
+    type: "tv",
+    pic: { normal: "https://img.example.com/community.jpg" },
+  };
+  const fallbackCommunity = toVideoItem(communitySeason);
+  assert.equal(fallbackCommunity.title, "思想验证区域");
+  assert.equal(fallbackCommunity.posterPath, communitySeason.pic.normal);
+  assert.equal(communitySeason.title, "思想验证区域 第二季", "must preserve the source search title");
+  assert.equal(toVideoItem({ ...communitySeason, type: "movie" }).title, communitySeason.title);
+  Widget.tmdb = { get: async () => ({ results: [] }) };
+  Widget.http.get = async () => ({ data: {} });
+  assert.equal((await toVideoItemWithTmdbPoster(communitySeason)).title, "思想验证区域");
+  Widget.tmdb.get = async () => { throw new Error("simulated TMDB outage"); };
+  assert.equal((await toVideoItemWithTmdbPoster(communitySeason)).title, "思想验证区域");
+  Widget.http.get = originalHttpGet;
+  delete Widget.tmdb;
   assert.equal(
     toNativeTmdbItem(
       { title: "机智的医生生活 第二季", type: "tv" },

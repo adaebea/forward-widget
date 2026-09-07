@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.douban.personal",
   title: "豆瓣片单",
-  version: "1.3.3",
+  version: "1.3.4",
   requiredVersion: "0.0.1",
   description: "展示豆瓣想看/在看，根据看过推荐，并支持近期热门",
   author: "adaebea",
@@ -167,7 +167,10 @@ function toVideoItem(subject) {
     id: link,
     type: "url",
     link: link,
-    title: subject.title || "",
+    // TMDB 未命中或请求失败时，入口也应保持整剧标题。
+    title: toMediaType(subject) === "tv"
+      ? tvBaseTitle(subject.title) || subject.title || ""
+      : subject.title || "",
     coverUrl: posterUrl,
     posterPath: posterUrl,
     backdropPath: posterUrl,
@@ -240,6 +243,11 @@ function addTmdbTitleCandidate(candidates, seen, subject, title, year) {
   // 原始季名作为兜底。详情入口会跳到命中的 TMDB 整剧详情页。
   if (toMediaType(subject) === "tv") {
     var baseTitle = tvBaseTitle(value);
+    // 豆瓣中文标题明确标注季度时，韩文原名也可能仅以数字标季。
+    // 仅处理韩文结尾 + 数字，避免改动英文片名或本身带数字的剧名。
+    if (/第\s*[一二三四五六七八九十百千万\d]+\s*季/.test(String(subject.title || ""))) {
+      baseTitle = baseTitle.replace(/([\uac00-\ud7af])\s*[1-9]\d?\s*$/, "$1").trim();
+    }
     if (baseTitle && baseTitle !== value) variants.unshift(baseTitle);
   }
   for (var i = 0; i < variants.length; i++) {
